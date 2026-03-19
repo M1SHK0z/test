@@ -1,1 +1,2 @@
-python-3.11.6
+discord.py==2.3.2
+flask
