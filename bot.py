@@ -77,7 +77,7 @@ async def on_ready():
 @app_commands.describe(user="User or user ID", amount="Amount like 100,000", action="Action to perform")
 @app_commands.choices(action=[
     app_commands.Choice(name="Restore", value="Restore"),
-    app_commands.Choice(name="Remove", value="Remove")  
+    app_commands.Choice(name="Remove", value="Remove")
 ])
 async def time(interaction: discord.Interaction, user: str, amount: str, action: app_commands.Choice[str]):
     if not has_allowed_role(interaction):
@@ -88,17 +88,18 @@ async def time(interaction: discord.Interaction, user: str, amount: str, action:
     except ValueError:
         await interaction.response.send_message("Invalid amount!", ephemeral=True)
         return
+
     payload = {"attributes": {"username": user, "amount": str(clean_amount), "action": action.name}}
-    global last_sent_payload_bot
-    if payload != last_sent_payload_bot:
-        last_sent_payload_bot = json.loads(json.dumps(payload))
-        print("----- /time Payload -----")
+    
+    # Send every command to Flask, no filtering
+    try:
+        requests.post(PYTHON_SERVER_URL, json=payload)
+        print("----- /time Payload Sent -----")
         print(payload)
-        print("------------------------")
-        try:
-            requests.post(PYTHON_SERVER_URL, json=payload)
-        except Exception as e:
-            print("Failed to send to Flask server:", e)
+        print("-------------------------------")
+    except Exception as e:
+        print("Failed to send to Flask server:", e)
+
     embed = discord.Embed(title=action.name, color=discord.Color.from_rgb(80, 80, 80))
     embed.add_field(name="Successful", value=f"{clean_amount:,}", inline=True)
     embed.add_field(name="User", value=user, inline=True)
