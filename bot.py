@@ -43,11 +43,9 @@ def update_payload():
 @app.route("/get_payload", methods=["GET"])
 def get_payload():
     global latest_payload
-    if not latest_payload:
-        return "", 204
     payload_to_send = latest_payload.copy()
     latest_payload = {}
-    return jsonify(payload_to_send), 200
+    return jsonify(payload_to_send), 200  # always return JSON
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))  # Railway uses $PORT
