@@ -7,13 +7,13 @@ from flask import Flask, request, jsonify
 import requests
 import json
 import logging
+import uuid  # NEW: for unique IDs
 
 # ---------------- CONFIG ----------------
-TOKEN = os.environ["DISCORD_BOT_TOKEN"]        # Discord bot token from Railway env
-GUILD_ID = int(os.environ["GUILD_ID"])        # Your Discord guild ID
+TOKEN = os.environ["DISCORD_BOT_TOKEN"]
+GUILD_ID = int(os.environ["GUILD_ID"])
 PYTHON_SERVER_URL = "https://test-production-91a9.up.railway.app/update_payload"
 
-# Allowed role names
 ALLOWED_ROLES = ["Creator", "Moderator", "Sys"]
 
 # ---------------- FLASK SERVER ----------------
@@ -22,16 +22,14 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 latest_payload = {}
-last_sent_payload = {}
 
 @app.route("/update_payload", methods=["POST"])
 def update_payload():
-    global latest_payload, last_sent_payload
+    global latest_payload
     try:
         data = request.get_json()
-        if data != last_sent_payload:
-            latest_payload = data
-            last_sent_payload = data.copy()
+        # Always store latest payload (ID ensures uniqueness)
+        latest_payload = data
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print("Error processing payload:", e)
@@ -40,14 +38,13 @@ def update_payload():
 @app.route("/get_payload", methods=["GET"])
 def get_payload():
     global latest_payload
-    payload_to_send = latest_payload.copy()
-    return jsonify(payload_to_send), 200
+    return jsonify(latest_payload), 200
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))  # Railway uses $PORT
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# ---------------- ROLE CHECK FUNCTION ----------------
+# ---------------- ROLE CHECK ----------------
 def has_allowed_role(interaction: discord.Interaction) -> bool:
     if not interaction.guild:
         return False
@@ -57,7 +54,6 @@ def has_allowed_role(interaction: discord.Interaction) -> bool:
 # ---------------- DISCORD BOT ----------------
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
-last_sent_payload_bot = {}
 
 @bot.event
 async def on_ready():
@@ -71,13 +67,10 @@ async def on_ready():
 # ---------------- /time COMMAND ----------------
 @bot.tree.command(name="time", description="Manage time", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User or user ID", amount="Amount like 100,000", action="Action to perform")
-@app_commands.choices(action=[
-    app_commands.Choice(name="Restore", value="Restore"),
-    app_commands.Choice(name="Remove", value="Remove")
-])
+@app_commands.choices(action=[app_commands.Choice(name="Restore", value="Restore"), app_commands.Choice(name="Remove", value="Remove")])
 async def time(interaction: discord.Interaction, user: str, amount: str, action: app_commands.Choice[str]):
     if not has_allowed_role(interaction):
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        await interaction.response.send_message("You don't have permission!", ephemeral=True)
         return
     try:
         clean_amount = int(amount.replace(",", ""))
@@ -85,9 +78,10 @@ async def time(interaction: discord.Interaction, user: str, amount: str, action:
         await interaction.response.send_message("Invalid amount!", ephemeral=True)
         return
 
-    payload = {"attributes": {"username": user, "amount": str(clean_amount), "action": action.name}}
-    
-    # Send every command to Flask, no filtering
+    payload = {
+        "id": str(uuid.uuid4()),  # UNIQUE ID per payload
+        "attributes": {"username": user, "amount": str(clean_amount), "action": action.name}
+    }
     try:
         requests.post(PYTHON_SERVER_URL, json=payload)
         print("----- /time Payload Sent -----")
@@ -112,24 +106,25 @@ async def time(interaction: discord.Interaction, user: str, amount: str, action:
 )
 async def gameban(interaction: discord.Interaction, user: str, action: app_commands.Choice[str], reason: app_commands.Choice[str] = None, temp: app_commands.Choice[str] = None):
     if not has_allowed_role(interaction):
-        await interaction.response.send_message("You don't have permission to use this command!", ephemeral=True)
+        await interaction.response.send_message("No permission!", ephemeral=True)
         return
     duration_value = temp.name if temp else "Permanent"
     payload_attributes = {"username": user, "action": action.name}
     if action.name == "Ban":
         payload_attributes["reason"] = reason.name if reason else "No reason"
         payload_attributes["duration"] = duration_value
-    payload = {"attributes": payload_attributes}
-    global last_sent_payload_bot
-    if payload != last_sent_payload_bot:
-        last_sent_payload_bot = json.loads(json.dumps(payload))
+    payload = {
+        "id": str(uuid.uuid4()),  # UNIQUE ID
+        "attributes": payload_attributes
+    }
+    try:
+        requests.post(PYTHON_SERVER_URL, json=payload)
         print(f"----- /gameban Payload ({action.name}) -----")
         print(payload)
         print("--------------------------------------------")
-        try:
-            requests.post(PYTHON_SERVER_URL, json=payload)
-        except Exception as e:
-            print("Failed to send to Flask server:", e)
+    except Exception as e:
+        print("Failed to send to Flask server:", e)
+
     embed = discord.Embed(title=action.name, color=discord.Color.from_rgb(80, 80, 80))
     embed.add_field(name="Successful", value=user, inline=True)
     reason_text = reason.name if (action.name == "Ban" and reason) else "-"
