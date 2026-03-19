@@ -11,7 +11,7 @@ import logging
 # ---------------- CONFIG ----------------
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]        # Discord bot token from Railway env
 GUILD_ID = int(os.environ["GUILD_ID"])        # Your Discord guild ID
-PYTHON_SERVER_URL = f"{os.environ['PUBLIC_URL']}/update_payload"  # Railway public URL
+PYTHON_SERVER_URL = "https://test-production-91a9.up.railway.app/update_payload"
 
 # Allowed role names
 ALLOWED_ROLES = ["Creator", "Moderator", "Sys"]
