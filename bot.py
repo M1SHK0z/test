@@ -77,8 +77,7 @@ async def on_ready():
 @app_commands.describe(user="User or user ID", amount="Amount like 100,000", action="Action to perform")
 @app_commands.choices(action=[
     app_commands.Choice(name="Restore", value="Restore"),
-    app_commands.Choice(name="Reset", value="Reset"),
-    app_commands.Choice(name="Remove", value="Remove")
+    app_commands.Choice(name="Remove", value="Remove")  
 ])
 async def time(interaction: discord.Interaction, user: str, amount: str, action: app_commands.Choice[str]):
     if not has_allowed_role(interaction):
