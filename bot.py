@@ -32,9 +32,6 @@ def update_payload():
         if data != last_sent_payload:
             latest_payload = data
             last_sent_payload = data.copy()
-            print("----- New Payload Received from Discord -----")
-            print(data)
-            print("---------------------------------------------")
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print("Error processing payload:", e)
