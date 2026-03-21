@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 import requests
 import json
 import logging
-import uuid  # NEW: for unique IDs
+import uuid
 
 # ---------------- CONFIG ----------------
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]
@@ -22,13 +22,24 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 latest_payload = {}
+logs_cache = {}  # ✅ ADDED
+
+# ✅ RECEIVE LOGS FROM ROBLOX
+@app.route("/receive_logs", methods=["POST"])
+def receive_logs():
+    global logs_cache
+    try:
+        logs_cache = request.get_json()
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print("Receive logs error:", e)
+        return jsonify({"status": "error"}), 400
 
 @app.route("/update_payload", methods=["POST"])
 def update_payload():
     global latest_payload
     try:
         data = request.get_json()
-        # Always store latest payload (ID ensures uniqueness)
         latest_payload = data
         return jsonify({"status": "ok"}), 200
     except Exception as e:
@@ -79,7 +90,7 @@ async def time(interaction: discord.Interaction, user: str, amount: str, action:
         return
 
     payload = {
-        "id": str(uuid.uuid4()),  # UNIQUE ID per payload
+        "id": str(uuid.uuid4()),
         "attributes": {"username": user, "amount": str(clean_amount), "action": action.name}
     }
     try:
@@ -114,14 +125,11 @@ async def gameban(interaction: discord.Interaction, user: str, action: app_comma
         payload_attributes["reason"] = reason.name if reason else "No reason"
         payload_attributes["duration"] = duration_value
     payload = {
-        "id": str(uuid.uuid4()),  # UNIQUE ID
+        "id": str(uuid.uuid4()),
         "attributes": payload_attributes
     }
     try:
         requests.post(PYTHON_SERVER_URL, json=payload)
-        print(f"----- /gameban Payload ({action.name}) -----")
-        print(payload)
-        print("--------------------------------------------")
     except Exception as e:
         print("Failed to send to Flask server:", e)
 
@@ -131,6 +139,66 @@ async def gameban(interaction: discord.Interaction, user: str, action: app_comma
     embed.add_field(name="Reason", value=reason_text, inline=True)
     embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
     await interaction.response.send_message(embed=embed)
+
+# ---------------- /logs COMMAND (NEW) ----------------
+@bot.tree.command(name="logs", description="View player logs", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user="Username")
+async def logs(interaction: discord.Interaction, user: str):
+    if not has_allowed_role(interaction):
+        await interaction.response.send_message("No permission!", ephemeral=True)
+        return
+
+    global logs_cache
+    logs_cache = {}
+
+    payload = {
+        "id": str(uuid.uuid4()),
+        "attributes": {
+            "username": user,
+            "action": "GetLogs"
+        }
+    }
+
+    try:
+        requests.post(PYTHON_SERVER_URL, json=payload)
+    except Exception as e:
+        print("Failed to send:", e)
+
+    await interaction.response.defer(ephemeral=True)
+
+    # wait for roblox response
+    import time
+    for _ in range(20):
+        if logs_cache:
+            break
+        time.sleep(0.3)
+
+    if not logs_cache:
+        await interaction.followup.send("No logs found.", ephemeral=True)
+        return
+
+    kills = logs_cache.get("kills", [])
+    deaths = logs_cache.get("deaths", [])
+
+    kill_text = "\n".join([
+        f"🟢 {k['victim']} (+{int(k['amount']):,})"
+        for k in kills[-10:]
+    ]) or "No kills"
+
+    death_text = "\n".join([
+        f"🔴 {d['killer']} (-{int(d['amount']):,})"
+        for d in deaths[-10:]
+    ]) or "No deaths"
+
+    embed = discord.Embed(
+        title=f"Logs for {user}",
+        color=discord.Color.dark_gray()
+    )
+
+    embed.add_field(name="Kills", value=kill_text, inline=False)
+    embed.add_field(name="Deaths", value=death_text, inline=False)
+
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------- RUN BOTH ----------------
 if __name__ == "__main__":
