@@ -21,15 +21,15 @@ app = Flask(__name__)
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-# Store all payloads
-payloads = []
+latest_payload = {}
 
 @app.route("/update_payload", methods=["POST"])
 def update_payload():
-    global payloads
+    global latest_payload
     try:
         data = request.get_json()
-        payloads.append(data)  # store every new payload
+        # Always store latest payload (ID ensures uniqueness)
+        latest_payload = data
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print("Error processing payload:", e)
@@ -37,8 +37,8 @@ def update_payload():
 
 @app.route("/get_payload", methods=["GET"])
 def get_payload():
-    global payloads
-    return jsonify(payloads), 200  # return ALL payloads
+    global latest_payload
+    return jsonify(latest_payload), 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
