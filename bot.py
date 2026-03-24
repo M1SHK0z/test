@@ -7,7 +7,8 @@ from flask import Flask, request, jsonify
 import requests
 import json
 import logging
-import uuid  # NEW: for unique IDs
+import uuid
+from collections import deque
 
 # ---------------- CONFIG ----------------
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]
@@ -21,15 +22,15 @@ app = Flask(__name__)
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-latest_payload = {}
+# Use a queue to store multiple payloads
+payload_queue = deque()
 
 @app.route("/update_payload", methods=["POST"])
 def update_payload():
-    global latest_payload
     try:
         data = request.get_json()
-        # Always store latest payload (ID ensures uniqueness)
-        latest_payload = data
+        data["id"] = str(uuid.uuid4())  # Ensure each payload has unique ID
+        payload_queue.append(data)
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print("Error processing payload:", e)
@@ -37,8 +38,11 @@ def update_payload():
 
 @app.route("/get_payload", methods=["GET"])
 def get_payload():
-    global latest_payload
-    return jsonify(latest_payload), 200
+    if payload_queue:
+        # Return and remove the oldest payload
+        return jsonify(payload_queue.popleft()), 200
+    else:
+        return jsonify({}), 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -79,7 +83,6 @@ async def time(interaction: discord.Interaction, user: str, amount: str, action:
         return
 
     payload = {
-        "id": str(uuid.uuid4()),  # UNIQUE ID per payload
         "attributes": {"username": user, "amount": str(clean_amount), "action": action.name}
     }
     try:
@@ -113,10 +116,7 @@ async def gameban(interaction: discord.Interaction, user: str, action: app_comma
     if action.name == "Ban":
         payload_attributes["reason"] = reason.name if reason else "No reason"
         payload_attributes["duration"] = duration_value
-    payload = {
-        "id": str(uuid.uuid4()),  # UNIQUE ID
-        "attributes": payload_attributes
-    }
+    payload = {"attributes": payload_attributes}
     try:
         requests.post(PYTHON_SERVER_URL, json=payload)
         print(f"----- /gameban Payload ({action.name}) -----")
@@ -137,4 +137,4 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
-    bot.run(TOKEN) 
+    bot.run(TOKEN)
