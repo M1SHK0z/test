@@ -5,9 +5,11 @@ from discord.ext import commands
 import threading
 from flask import Flask, request, jsonify
 import requests
-import json
+import uuid
 import logging
-import uuid  # NEW: for unique IDs
+import json
+from collections import defaultdict
+from time import time
 
 # ---------------- CONFIG ----------------
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]
@@ -21,24 +23,46 @@ app = Flask(__name__)
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-latest_payload = {}
+# Queue of pending payloads (append-only)
+payload_queue = []
 
 @app.route("/update_payload", methods=["POST"])
 def update_payload():
-    global latest_payload
     try:
         data = request.get_json()
-        # Always store latest payload (ID ensures uniqueness)
-        latest_payload = data
+        if not data.get("id"):
+            data["id"] = str(uuid.uuid4())
+        data.setdefault("created_at", int(time()))
+        payload_queue.append(data)
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         print("Error processing payload:", e)
         return jsonify({"status": "error"}), 400
 
-@app.route("/get_payload", methods=["GET"])
-def get_payload():
-    global latest_payload
-    return jsonify(latest_payload), 200
+@app.route("/get_payloads", methods=["GET"])
+def get_payloads():
+    # Return all pending payloads in FIFO order
+    global payload_queue
+    # Return a copy to prevent mutation while reading
+    return jsonify({"payloads": payload_queue.copy()}), 200
+
+@app.route("/ack_payloads", methods=["POST"])
+def ack_payloads():
+    global payload_queue
+    try:
+        data = request.get_json()
+        ack_ids = data.get("ids", [])
+        if not ack_ids:
+            return jsonify({"status": "ok", "acknowledged": 0}), 200
+
+        # Remove acknowledged payloads
+        before = len(payload_queue)
+        payload_queue = [p for p in payload_queue if p.get("id") not in ack_ids]
+        removed = before - len(payload_queue)
+        return jsonify({"status": "ok", "acknowledged": removed}), 200
+    except Exception as e:
+        print("Error acking payloads:", e)
+        return jsonify({"status": "error"}), 400
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -67,7 +91,10 @@ async def on_ready():
 # ---------------- /time COMMAND ----------------
 @bot.tree.command(name="time", description="Manage time", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User or user ID", amount="Amount like 100,000", action="Action to perform")
-@app_commands.choices(action=[app_commands.Choice(name="Restore", value="Restore"), app_commands.Choice(name="Remove", value="Remove")])
+@app_commands.choices(action=[
+    app_commands.Choice(name="Restore", value="Restore"),
+    app_commands.Choice(name="Remove", value="Remove")
+])
 async def time(interaction: discord.Interaction, user: str, amount: str, action: app_commands.Choice[str]):
     if not has_allowed_role(interaction):
         await interaction.response.send_message("You don't have permission!", ephemeral=True)
@@ -79,13 +106,14 @@ async def time(interaction: discord.Interaction, user: str, amount: str, action:
         return
 
     payload = {
-        "id": str(uuid.uuid4()),  # UNIQUE ID per payload
-        "attributes": {"username": user, "amount": str(clean_amount), "action": action.name}
+        "id": str(uuid.uuid4()),
+        "attributes": {"username": user, "amount": str(clean_amount), "action": action.name},
+        "created_at": int(time())
     }
     try:
         requests.post(PYTHON_SERVER_URL, json=payload)
         print("----- /time Payload Sent -----")
-        print(payload)
+        print(json.dumps(payload, indent=2))
         print("-------------------------------")
     except Exception as e:
         print("Failed to send to Flask server:", e)
@@ -113,14 +141,16 @@ async def gameban(interaction: discord.Interaction, user: str, action: app_comma
     if action.name == "Ban":
         payload_attributes["reason"] = reason.name if reason else "No reason"
         payload_attributes["duration"] = duration_value
+
     payload = {
-        "id": str(uuid.uuid4()),  # UNIQUE ID
-        "attributes": payload_attributes
+        "id": str(uuid.uuid4()),
+        "attributes": payload_attributes,
+        "created_at": int(time())
     }
     try:
         requests.post(PYTHON_SERVER_URL, json=payload)
         print(f"----- /gameban Payload ({action.name}) -----")
-        print(payload)
+        print(json.dumps(payload, indent=2))
         print("--------------------------------------------")
     except Exception as e:
         print("Failed to send to Flask server:", e)
@@ -137,4 +167,4 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
-    bot.run(TOKEN) 
+    bot.run(TOKEN)
