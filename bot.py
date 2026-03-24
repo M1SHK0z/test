@@ -21,21 +21,24 @@ app = Flask(__name__)
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-latest_payloads = []  # keep a rolling list of last 25
+latest_payload = {}
 
 @app.route("/update_payload", methods=["POST"])
 def update_payload():
-    global latest_payloads
-    data = request.get_json()
-    # Append and keep only last 25
-    latest_payloads.append(data)
-    latest_payloads = latest_payloads[-25:]
-    return jsonify({"status": "ok"}), 200
+    global latest_payload
+    try:
+        data = request.get_json()
+        # Always store latest payload (ID ensures uniqueness)
+        latest_payload = data
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print("Error processing payload:", e)
+        return jsonify({"status": "error"}), 400
 
 @app.route("/get_payload", methods=["GET"])
 def get_payload():
-    global latest_payloads
-    return jsonify(latest_payloads), 200
+    global latest_payload
+    return jsonify(latest_payload), 200
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
