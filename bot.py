@@ -180,17 +180,17 @@ async def logs(interaction: discord.Interaction, username: str):
             result += f"\n*+{extra} more*"
         return result
 
-    kill_text  = build_field(kills,  lambda e: f"🗡 **{e.get('victim','?')}** — +{fmt(e.get('gained',0))}")
-    death_text = build_field(deaths, lambda e: f"💀 **{e.get('killer','?')}** — -{fmt(e.get('lost',0))}")
-    void_text  = build_field(voids,  lambda e: f"⚫ -{fmt(e.get('lost',0))} — {e.get('reason','Unknown')}")
+    kill_text  = build_field(kills,  lambda e: f"🟩 **{e.get('victim','?')}** — +{fmt(e.get('gained',0))} — {e.get('distance', 0):.2f} studs")
+    death_text = build_field(deaths, lambda e: f"🟥 **{e.get('killer','?')}** — -{fmt(e.get('lost',0))}")
+    void_text  = build_field(voids,  lambda e: f"⬛ -{fmt(e.get('lost',0))} — {e.get('reason','Unknown')}")
 
     embed = discord.Embed(
         title=f"Logs — {username}",
         color=discord.Color.from_rgb(80, 80, 80)
     )
-    embed.add_field(name=f"⚔️ Kills ({len(kills)})",  value=kill_text,  inline=False)
-    embed.add_field(name=f"💀 Deaths ({len(deaths)})", value=death_text, inline=False)
-    embed.add_field(name=f"⚫ Voids ({len(voids)})",   value=void_text,  inline=False)
+    embed.add_field(name=f"🟩 Kills ({len(kills)})",  value=kill_text,  inline=False)
+    embed.add_field(name=f"🟥 Deaths ({len(deaths)})", value=death_text, inline=False)
+    embed.add_field(name=f"⬛ Voids ({len(voids)})",   value=void_text,  inline=False)
     embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
 
     await interaction.response.send_message(embed=embed)
