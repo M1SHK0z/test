@@ -7,6 +7,7 @@ from flask import Flask, request, jsonify
 import requests
 import logging
 import uuid
+from collections import defaultdict
 
 TOKEN = os.environ["DISCORD_BOT_TOKEN"]
 GUILD_ID = int(os.environ["GUILD_ID"])
@@ -20,6 +21,11 @@ log.setLevel(logging.ERROR)
 
 payload_queue = []
 queue_lock = threading.Lock()
+
+# key: username.lower() → {"kills": [...], "deaths": [...], "voids": [...]}
+logs_store = defaultdict(lambda: {"kills": [], "deaths": [], "voids": []})
+logs_lock = threading.Lock()
+MAX_LOGS = 100
 
 @app.route("/push_payload", methods=["POST"])
 def push_payload():
@@ -39,6 +45,33 @@ def pop_payload():
             return jsonify(payload_queue.pop(0)), 200
         return jsonify({}), 200
 
+# Roblox pushes logs here
+# Expected body:
+# { "type": "kill"|"death"|"void", "username": str,
+#   "kill":  { "victim": str, "gained": int },
+#   "death": { "killer": str, "lost": int },
+#   "void":  { "lost": int, "reason": str } }
+@app.route("/push_log", methods=["POST"])
+def push_log():
+    try:
+        data = request.get_json()
+        t = data.get("type")
+        username = (data.get("username") or "").lower()
+        if not username or t not in ("kill", "death", "void"):
+            return jsonify({"status": "bad"}), 400
+
+        with logs_lock:
+            bucket = logs_store[username][t + "s"]
+            entry = data.get(t, {})
+            bucket.insert(0, entry)
+            if len(bucket) > MAX_LOGS:
+                bucket.pop()
+
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        print("log push error:", e)
+        return jsonify({"status": "error"}), 400
+
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
@@ -47,6 +80,12 @@ def has_allowed_role(interaction: discord.Interaction) -> bool:
     if not interaction.guild:
         return False
     return any(r.name in ALLOWED_ROLES for r in interaction.user.roles)
+
+def fmt(n):
+    try:
+        return f"{int(n):,}"
+    except:
+        return str(n)
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -112,6 +151,48 @@ async def gameban(interaction: discord.Interaction, user: str, action: app_comma
     embed.add_field(name="Successful", value=user, inline=True)
     embed.add_field(name="Reason", value=reason.name if (action.name == "Ban" and reason) else "-", inline=True)
     embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="logs", description="View kill/death/void logs for a player", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(username="Roblox username to look up")
+async def logs(interaction: discord.Interaction, username: str):
+    if not has_allowed_role(interaction):
+        await interaction.response.send_message("No permission!", ephemeral=True)
+        return
+
+    key = username.lower()
+    with logs_lock:
+        data = logs_store.get(key)
+        if not data:
+            await interaction.response.send_message(f"No logs found for **{username}**.", ephemeral=True)
+            return
+        kills  = list(data["kills"])
+        deaths = list(data["deaths"])
+        voids  = list(data["voids"])
+
+    def build_field(entries, fmt_fn, limit=10):
+        if not entries:
+            return "None"
+        lines = [fmt_fn(e) for e in entries[:limit]]
+        extra = len(entries) - limit
+        result = "\n".join(lines)
+        if extra > 0:
+            result += f"\n*+{extra} more*"
+        return result
+
+    kill_text  = build_field(kills,  lambda e: f"🗡 **{e.get('victim','?')}** — +{fmt(e.get('gained',0))}")
+    death_text = build_field(deaths, lambda e: f"💀 **{e.get('killer','?')}** — -{fmt(e.get('lost',0))}")
+    void_text  = build_field(voids,  lambda e: f"⚫ -{fmt(e.get('lost',0))} — {e.get('reason','Unknown')}")
+
+    embed = discord.Embed(
+        title=f"Logs — {username}",
+        color=discord.Color.from_rgb(80, 80, 80)
+    )
+    embed.add_field(name=f"⚔️ Kills ({len(kills)})",  value=kill_text,  inline=False)
+    embed.add_field(name=f"💀 Deaths ({len(deaths)})", value=death_text, inline=False)
+    embed.add_field(name=f"⚫ Voids ({len(voids)})",   value=void_text,  inline=False)
+    embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+
     await interaction.response.send_message(embed=embed)
 
 if __name__ == "__main__":
