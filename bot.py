@@ -153,6 +153,26 @@ async def gameban(interaction: discord.Interaction, user: str, action: app_comma
     embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
     await interaction.response.send_message(embed=embed)
 
+def get_roblox_info(username: str):
+    try:
+        r = requests.post(
+            "https://users.roblox.com/v1/usernames/users",
+            json={"usernames": [username], "excludeBannedUsers": False},
+            timeout=5
+        )
+        data = r.json().get("data", [])
+        if not data:
+            return None, None
+        uid = data[0]["id"]
+        thumb = requests.get(
+            f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={uid}&size=150x150&format=Png&isCircular=false",
+            timeout=5
+        ).json()
+        img_url = thumb.get("data", [{}])[0].get("imageUrl")
+        return uid, img_url
+    except:
+        return None, None
+
 @bot.tree.command(name="logs", description="View kill/death/void logs for a player", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(username="Roblox username to look up")
 async def logs(interaction: discord.Interaction, username: str):
@@ -170,6 +190,8 @@ async def logs(interaction: discord.Interaction, username: str):
         deaths = list(data["deaths"])
         voids  = list(data["voids"])
 
+    uid, avatar_url = get_roblox_info(username)
+
     def build_field(entries, fmt_fn, limit=10):
         if not entries:
             return "None"
@@ -184,10 +206,14 @@ async def logs(interaction: discord.Interaction, username: str):
     death_text = build_field(deaths, lambda e: f"🟥 **{e.get('killer','?')}** — -{fmt(e.get('lost',0))} — {e.get('distance', 0):.2f} studs")
     void_text  = build_field(voids,  lambda e: f"⬛ -{fmt(e.get('lost',0))} — {e.get('reason','Unknown')}")
 
+    uid_str = f"UID: {uid}" if uid else ""
     embed = discord.Embed(
         title=f"Logs — {username}",
+        description=uid_str,
         color=discord.Color.from_rgb(80, 80, 80)
     )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     embed.add_field(name=f"🟩 Kills ({len(kills)})",  value=kill_text,  inline=False)
     embed.add_field(name=f"🟥 Deaths ({len(deaths)})", value=death_text, inline=False)
     embed.add_field(name=f"⬛ Voids ({len(voids)})",   value=void_text,  inline=False)
