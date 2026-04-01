@@ -181,7 +181,7 @@ async def logs(interaction: discord.Interaction, username: str):
         return result
 
     kill_text  = build_field(kills,  lambda e: f"🟩 **{e.get('victim','?')}** — +{fmt(e.get('gained',0))} — {e.get('distance', 0):.2f} studs")
-    death_text = build_field(deaths, lambda e: f"🟥 **{e.get('killer','?')}** — -{fmt(e.get('lost',0))}")
+    death_text = build_field(deaths, lambda e: f"🟥 **{e.get('killer','?')}** — -{fmt(e.get('lost',0))} — {e.get('distance', 0):.2f} studs")
     void_text  = build_field(voids,  lambda e: f"⬛ -{fmt(e.get('lost',0))} — {e.get('reason','Unknown')}")
 
     embed = discord.Embed(
